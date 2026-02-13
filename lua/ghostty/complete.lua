@@ -87,6 +87,71 @@ local function value_prefix(line, col0)
 	return rhs:gsub("^%s+", "")
 end
 
+local function resolve_search_dir(base_dir, dir_part)
+	if dir_part == "" then
+		return base_dir
+	end
+
+	if dir_part:sub(1, 1) == "/" then
+		return dir_part
+	end
+
+	if dir_part:sub(1, 1) == "~" then
+		return vim.fn.expand(dir_part)
+	end
+
+	return vim.fs.normalize(base_dir .. "/" .. dir_part)
+end
+
+local function path_candidates_for_prefix(prefix)
+	if prefix == "" then
+		return {}
+	end
+
+	local buf_path = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+	local base_dir = vim.fs.dirname(buf_path)
+	if not base_dir or base_dir == "" then
+		return {}
+	end
+
+	local dir_part, name_prefix = prefix:match("^(.*)/([^/]*)$")
+	if not dir_part then
+		dir_part = ""
+		name_prefix = prefix
+	end
+
+	local search_dir = resolve_search_dir(base_dir, dir_part)
+	if vim.fn.isdirectory(search_dir) ~= 1 then
+		return {}
+	end
+
+	local out = {}
+	for _, name in ipairs(vim.fn.readdir(search_dir)) do
+		if starts_with(name, name_prefix) then
+			local absolute_candidate = search_dir .. "/" .. name
+			local is_dir = vim.fn.isdirectory(absolute_candidate) == 1
+
+			if is_dir or name:match("%.glsl$") or name:match("%.wgsl$") then
+				local candidate
+				if dir_part == "" then
+					candidate = name
+				else
+					candidate = dir_part .. "/" .. name
+				end
+
+				if is_dir then
+					candidate = candidate .. "/"
+				end
+
+				table.insert(out, candidate)
+			end
+		end
+	end
+
+	table.sort(out)
+	return out
+end
+
 function M.clear_cache()
 	cache.themes = nil
 	cache.actions = nil
@@ -126,6 +191,10 @@ local function collect_matches(line, col0, base)
 			if prefix == "" or starts_with(a, prefix) then
 				table.insert(matches, a)
 			end
+		end
+	elseif key == "custom-shader" then
+		for _, path in ipairs(path_candidates_for_prefix(prefix)) do
+			table.insert(matches, path)
 		end
 	end
 
