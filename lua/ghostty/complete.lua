@@ -92,34 +92,8 @@ function M.clear_cache()
 	cache.actions = nil
 end
 
--- Omni completion entry point
--- :h complete-functions
-function M.omnifunc(findstart, base)
-	local line, col0 = current_line_and_col()
+local function collect_matches(line, col0, base)
 	local kind = context_for(line, col0)
-
-	if findstart == 1 then
-		-- return byte-index start of completion
-		local start = col0
-		if kind == "key" then
-			while start > 0 and line:sub(start, start):match("[%w%-%_]") do
-				start = start - 1
-			end
-			return start
-		else
-			-- for value: complete from after '=' and spaces
-			local eq = line:find("=", 1, true)
-			if not eq then
-				return col0
-			end
-			start = eq + 1
-			while start <= #line and line:sub(start, start):match("%s") do
-				start = start + 1
-			end
-			return start - 1 -- 0-based
-		end
-	end
-
 	local matches = {}
 
 	if kind == "key" then
@@ -156,6 +130,54 @@ function M.omnifunc(findstart, base)
 	end
 
 	return matches
+end
+
+function M.items_for_cursor()
+	local line, col0 = current_line_and_col()
+	local base = ""
+
+	if context_for(line, col0) == "key" then
+		base = (line:sub(1, col0):match("([%w%-%_]*)$") or "")
+	end
+
+	local matches = collect_matches(line, col0, base)
+	local items = {}
+	for _, label in ipairs(matches) do
+		table.insert(items, { label = label })
+	end
+
+	return items
+end
+
+-- Omni completion entry point
+-- :h complete-functions
+function M.omnifunc(findstart, base)
+	local line, col0 = current_line_and_col()
+	local kind = context_for(line, col0)
+
+	if findstart == 1 then
+		-- return byte-index start of completion
+		local start = col0
+		if kind == "key" then
+			while start > 0 and line:sub(start, start):match("[%w%-%_]") do
+				start = start - 1
+			end
+			return start
+		else
+			-- for value: complete from after '=' and spaces
+			local eq = line:find("=", 1, true)
+			if not eq then
+				return col0
+			end
+			start = eq + 1
+			while start <= #line and line:sub(start, start):match("%s") do
+				start = start + 1
+			end
+			return start - 1 -- 0-based
+		end
+	end
+
+	return collect_matches(line, col0, base)
 end
 
 return M
