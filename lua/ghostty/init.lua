@@ -138,7 +138,7 @@ function M.setup(opts)
 		end
 
 		formatting = true
-		xtry(function()
+		local ok = xtry(function()
 			local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 			local formatted = format_ghostty_lines(lines)
 
@@ -148,6 +148,7 @@ function M.setup(opts)
 			end
 		end, "format")
 		formatting = false
+		return ok
 	end
 
 	local function do_reload()
@@ -176,20 +177,18 @@ end tell
 		end, "reload")
 	end
 
-	-- Format on save: schedule formatting OUTSIDE of autocmd stack
 	vim.api.nvim_create_autocmd("BufWritePre", {
 		group = aug,
 		pattern = target,
 		desc = "Format Ghostty config on save (aligned blocks)",
 		callback = function(args)
-			-- do nothing heavy here
-			local bufnr = args.buf
-			vim.schedule(function()
-				do_format(bufnr)
-			end)
+			if vim.api.nvim_buf_get_name(args.buf) ~= target then
+				return
+			end
+			-- run synchronously so the write includes formatted content
+			do_format(args.buf)
 		end,
 	})
-
 	-- Reload on save: schedule OUTSIDE of autocmd stack and debounce without libuv timers
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		group = aug,
