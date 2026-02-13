@@ -44,6 +44,7 @@ function M.setup(opts)
 				end
 				vim.bo[args.buf].filetype = "ghostty"
 				vim.bo[args.buf].commentstring = "# %s"
+				vim.bo[args.buf].omnifunc = "v:lua.require'ghostty.complete'.omnifunc"
 			end, "BufRead/BufNewFile")
 		end,
 	})
@@ -209,6 +210,21 @@ end tell
 			end, 150)
 		end,
 	})
+
+	pcall(vim.api.nvim_del_user_command, "GhosttyClearCache")
+	vim.api.nvim_create_user_command("GhosttyClearCache", function()
+		require("ghostty.complete").clear_cache()
+	end, { desc = "Clear ghostty.nvim completion cache" })
+
+	pcall(vim.api.nvim_del_user_command, "GhosttyReload")
+	vim.api.nvim_create_user_command("GhosttyReload", function()
+		do_reload()
+	end, { desc = "Reload Ghostty config (macOS)" })
+
+	pcall(vim.api.nvim_del_user_command, "GhosttyFormat")
+	vim.api.nvim_create_user_command("GhosttyFormat", function()
+		do_format(vim.api.nvim_get_current_buf())
+	end, { desc = "Format Ghostty config buffer" })
 end
 
 return M
