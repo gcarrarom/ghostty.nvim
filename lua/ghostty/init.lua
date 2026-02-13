@@ -32,6 +32,7 @@ function M.setup(opts)
 	-- Re-entrancy guards
 	local formatting = false
 	local reload_scheduled = false
+	local blink_registered = false
 
 	vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
 		group = aug,
@@ -216,23 +217,48 @@ end tell
 		end,
 	})
 
-	-- Register Blink provider (if Blink is installed)
-	xtry(function()
-		local ok_blink, blink = pcall(require, "blink.cmp")
-		if not ok_blink then
+	local function register_blink_source()
+		if blink_registered then
 			return
 		end
 
-		-- Blink exposes a registry for custom providers in recent versions.
-		-- We'll attempt both common APIs defensively.
-		local provider = require("ghostty.blink_provider")
+		xtry(function()
+			local ok_blink, blink = pcall(require, "blink.cmp")
+			if not ok_blink then
+				return
+			end
 
-		if blink and blink.register_provider then
-			blink.register_provider("ghostty", provider)
-		elseif package.loaded["blink.cmp.sources"] and require("blink.cmp.sources").register_provider then
-			require("blink.cmp.sources").register_provider("ghostty", provider)
-		end
-	end, "blink-register")
+			-- New Blink API: configure provider + attach to filetype.
+			if blink.add_source_provider and blink.add_filetype_source then
+				pcall(blink.add_source_provider, "ghostty", {
+					name = "Ghostty",
+					module = "ghostty.blink_provider",
+				})
+				pcall(blink.add_filetype_source, "ghostty", "ghostty")
+				blink_registered = true
+				return
+			end
+
+			-- Legacy Blink API fallback.
+			local provider = require("ghostty.blink_provider")
+			if blink.register_provider then
+				blink.register_provider("ghostty", provider)
+				blink_registered = true
+			elseif package.loaded["blink.cmp.sources"] and require("blink.cmp.sources").register_provider then
+				require("blink.cmp.sources").register_provider("ghostty", provider)
+				blink_registered = true
+			end
+		end, "blink-register")
+	end
+
+	register_blink_source()
+
+	vim.api.nvim_create_autocmd("FileType", {
+		group = aug,
+		pattern = "ghostty",
+		desc = "Register Ghostty Blink source when needed",
+		callback = register_blink_source,
+	})
 
 	xtry(function()
 		local ok_cmp, cmp = pcall(require, "cmp")

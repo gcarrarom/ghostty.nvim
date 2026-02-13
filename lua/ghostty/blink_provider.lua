@@ -13,25 +13,45 @@ local function to_items(raw_items)
 	return items
 end
 
--- Blink provider interface: provide completion items
--- We keep this minimal and defensive.
-function M.complete(ctx, callback)
-	-- Only for ghostty filetype
+local function empty_response(callback)
+	callback({
+		items = {},
+		is_incomplete_forward = false,
+		is_incomplete_backward = false,
+	})
+end
+
+function M.new(_opts)
+	return setmetatable({}, { __index = M })
+end
+
+function M:enabled()
+	return vim.bo.filetype == "ghostty"
+end
+
+function M:get_completions(_context, callback)
 	if vim.bo.filetype ~= "ghostty" then
-		return callback({ items = {}, is_incomplete = false })
+		empty_response(callback)
+		return
 	end
 
 	local ok, mod = pcall(require, "ghostty.complete")
 	if not ok then
-		return callback({ items = {}, is_incomplete = false })
+		empty_response(callback)
+		return
 	end
 
-	local ok2, raw = pcall(mod.items_for_cursor)
-	if not ok2 then
-		return callback({ items = {}, is_incomplete = false })
+	local ok_items, raw_items = pcall(mod.items_for_cursor)
+	if not ok_items then
+		empty_response(callback)
+		return
 	end
 
-	return callback({ items = to_items(raw), is_incomplete = true })
+	callback({
+		items = to_items(raw_items),
+		is_incomplete_forward = true,
+		is_incomplete_backward = true,
+	})
 end
 
 return M
