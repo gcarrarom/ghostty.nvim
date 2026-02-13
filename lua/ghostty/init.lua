@@ -214,6 +214,24 @@ end tell
 				do_reload()
 			end, 150)
 		end,
+
+		-- Register Blink provider (if Blink is installed)
+		xtry(function()
+			local ok_blink, blink = pcall(require, "blink.cmp")
+			if not ok_blink then
+				return
+			end
+
+			-- Blink exposes a registry for custom providers in recent versions.
+			-- We'll attempt both common APIs defensively.
+			local provider = require("ghostty.blink_provider")
+
+			if blink and blink.register_provider then
+				blink.register_provider("ghostty", provider)
+			elseif package.loaded["blink.cmp.sources"] and require("blink.cmp.sources").register_provider then
+				require("blink.cmp.sources").register_provider("ghostty", provider)
+			end
+		end, "blink-register"),
 	})
 
 	xtry(function()
