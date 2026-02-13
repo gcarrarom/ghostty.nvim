@@ -1,24 +1,57 @@
 local M = {}
 
+local function safe_notify(msg, level)
+	-- never let notify crash anything
+	pcall(function()
+		vim.schedule(function()
+			if vim.notify then
+				vim.notify(msg, level or vim.log.levels.WARN)
+			end
+		end)
+	end)
+end
+
+local function xtry(fn, context)
+	return xpcall(fn, function(err)
+		local trace = debug.traceback(err, 2)
+		safe_notify(("ghostty.nvim error (%s):\n%s"):format(context or "unknown", trace), vim.log.levels.ERROR)
+		return err
+	end)
+end
+
 function M.setup(opts)
 	opts = opts or {}
 	local target = vim.fn.expand(opts.target or "~/.config/ghostty/config")
 
+	-- Feature flags (so you can quickly disable parts)
+	local enable_format = opts.format ~= false
+	local enable_reload = opts.reload ~= false
+
 	local aug = vim.api.nvim_create_augroup("GhosttyConfig", { clear = true })
 
-	-- Filetype + commentstring for no-extension file
+	-- Re-entrancy guards
+	local formatting = false
+	local reload_scheduled = false
+
 	vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
 		group = aug,
 		pattern = target,
 		desc = "Set ghostty filetype/options",
-		callback = function()
-			vim.bo.filetype = "ghostty"
-			vim.bo.commentstring = "# %s"
+		callback = function(args)
+			xtry(function()
+				if vim.api.nvim_buf_get_name(args.buf) ~= target then
+					return
+				end
+				vim.bo[args.buf].filetype = "ghostty"
+				vim.bo[args.buf].commentstring = "# %s"
+			end, "BufRead/BufNewFile")
 		end,
 	})
 
 	local function parse_assignment(line)
 		local main, cmt = line, nil
+
+		-- Inline comment only when # is preceded by whitespace
 		local before, after = line:match("^(.-)%s+#%s*(.*)$")
 		if before then
 			main = before
@@ -72,6 +105,7 @@ function M.setup(opts)
 				flush_block()
 				table.insert(out, "")
 			elseif line:match("^%s*#") then
+				-- keep comment lines, don't end block
 				table.insert(block, { kind = "comment", text = line:gsub("%s+$", "") })
 			else
 				local a = parse_assignment(line)
@@ -89,47 +123,40 @@ function M.setup(opts)
 		return out
 	end
 
-	local function format_ghostty_buf(bufnr)
+	local function do_format(bufnr)
+		if not enable_format then
+			return
+		end
+		if formatting then
+			return
+		end
 		if not vim.api.nvim_buf_is_valid(bufnr) then
 			return
 		end
-
-		local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-		local formatted = format_ghostty_lines(lines)
-
-		-- avoid unnecessary buffer changes
-		if table.concat(lines, "\n") == table.concat(formatted, "\n") then
+		if vim.api.nvim_buf_get_name(bufnr) ~= target then
 			return
 		end
 
-		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, formatted)
+		formatting = true
+		xtry(function()
+			local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+			local formatted = format_ghostty_lines(lines)
+
+			-- avoid unnecessary buffer changes
+			if table.concat(lines, "\n") ~= table.concat(formatted, "\n") then
+				vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, formatted)
+			end
+		end, "format")
+		formatting = false
 	end
 
-	-- Format before save (protected)
-	vim.api.nvim_create_autocmd("BufWritePre", {
-		group = aug,
-		pattern = target,
-		desc = "Format Ghostty config on save (aligned blocks)",
-		callback = function(args)
-			local ok, err = pcall(function()
-				if vim.api.nvim_buf_get_name(args.buf) ~= target then
-					return
-				end
-				format_ghostty_buf(args.buf)
-			end)
-
-			if not ok then
-				vim.schedule(function()
-					vim.notify("ghostty.nvim formatter error: " .. tostring(err), vim.log.levels.WARN)
-				end)
-			end
-		end,
-	})
-
-	-- Debounce reload (prevents multiple rapid reloads)
-	local reload_timer = nil
-
-	local function reload_ghostty()
+	local function do_reload()
+		if not enable_reload then
+			return
+		end
+		if vim.fn.has("mac") ~= 1 then
+			return
+		end
 		if vim.fn.executable("osascript") ~= 1 then
 			return
 		end
@@ -144,12 +171,26 @@ tell application "System Events"
 end tell
 ]]
 
-		pcall(function()
+		xtry(function()
 			vim.fn.jobstart({ "osascript", "-e", script }, { detach = true })
-		end)
+		end, "reload")
 	end
 
-	-- Reload after save (protected)
+	-- Format on save: schedule formatting OUTSIDE of autocmd stack
+	vim.api.nvim_create_autocmd("BufWritePre", {
+		group = aug,
+		pattern = target,
+		desc = "Format Ghostty config on save (aligned blocks)",
+		callback = function(args)
+			-- do nothing heavy here
+			local bufnr = args.buf
+			vim.schedule(function()
+				do_format(bufnr)
+			end)
+		end,
+	})
+
+	-- Reload on save: schedule OUTSIDE of autocmd stack and debounce without libuv timers
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		group = aug,
 		pattern = target,
@@ -158,23 +199,16 @@ end tell
 			if vim.api.nvim_buf_get_name(args.buf) ~= target then
 				return
 			end
-
-			-- debounce
-			if reload_timer then
-				reload_timer:stop()
-				reload_timer:close()
+			if reload_scheduled then
+				return
 			end
+			reload_scheduled = true
 
-			reload_timer = vim.loop.new_timer()
-			reload_timer:start(150, 0, function()
-				reload_timer:stop()
-				reload_timer:close()
-				reload_timer = nil
-
-				vim.schedule(function()
-					reload_ghostty()
-				end)
-			end)
+			-- debounce using defer_fn (safer than libuv timers here)
+			vim.defer_fn(function()
+				reload_scheduled = false
+				do_reload()
+			end, 150)
 		end,
 	})
 end
