@@ -27,7 +27,7 @@ local function get_themes()
 	if cache.themes then
 		return cache.themes
 	end
-	cache.themes = syslist({ "ghostty", "+list-themes" })
+	cache.themes = syslist({ "ghostty", "+list-themes", "--plain" })
 	return cache.themes
 end
 
@@ -37,6 +37,11 @@ local function get_actions()
 	end
 	cache.actions = syslist({ "ghostty", "+list-actions" })
 	return cache.actions
+end
+local function normalize_theme(line)
+	line = (line:gsub("%s+$", ""))
+	line = line:gsub("%s*%b()%s*$", "") -- removes trailing " (resources)" or any "(...)" at end
+	return line
 end
 
 local KEYS = {
@@ -88,8 +93,9 @@ function M.items_for_cursor()
 	tok = (tok:match("([^%s]+)$") or tok)
 
 	if key == "theme" then
-		for _, t in ipairs(get_themes()) do
-			if tok == "" or starts_with(t, tok) then
+		for _, raw in ipairs(get_themes()) do
+			local t = normalize_theme(raw)
+			if t ~= "" and (tok == "" or starts_with(t, tok)) then
 				table.insert(items, { label = t, kind = "Value" })
 			end
 		end
