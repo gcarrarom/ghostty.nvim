@@ -44,7 +44,12 @@ function M.setup(opts)
 				end
 				vim.bo[args.buf].filetype = "ghostty"
 				vim.bo[args.buf].commentstring = "# %s"
-				vim.bo[args.buf].omnifunc = "v:lua.require'ghostty.complete'.omnifunc"
+
+				_G._ghostty_omnifunc = _G._ghostty_omnifunc
+					or function(findstart, base)
+						return require("ghostty.complete").omnifunc(findstart, base)
+					end
+				vim.bo[args.buf].omnifunc = "v:lua._ghostty_omnifunc"
 			end, "BufRead/BufNewFile")
 		end,
 	})
