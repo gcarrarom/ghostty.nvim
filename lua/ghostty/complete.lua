@@ -23,6 +23,12 @@ local function syslist(cmd)
 	return res
 end
 
+local function normalize_theme(line)
+	line = (line:gsub("%s+$", ""))
+	line = line:gsub("%s*%b()%s*$", "") -- remove trailing "(resources)" etc
+	return line
+end
+
 local function get_themes()
 	if cache.themes then
 		return cache.themes
@@ -38,11 +44,6 @@ local function get_actions()
 	cache.actions = syslist({ "ghostty", "+list-actions" })
 	return cache.actions
 end
-local function normalize_theme(line)
-	line = (line:gsub("%s+$", ""))
-	line = line:gsub("%s*%b()%s*$", "") -- removes trailing " (resources)" or any "(...)" at end
-	return line
-end
 
 local KEYS = {
 	"theme",
@@ -55,71 +56,106 @@ local KEYS = {
 }
 
 local function starts_with(s, prefix)
+	s = s:lower()
+	prefix = prefix:lower()
 	return s:sub(1, #prefix) == prefix
 end
 
-local function line_context(line, col0)
+local function current_line_and_col()
+	local bufnr = vim.api.nvim_get_current_buf()
+	local row, col0 = unpack(vim.api.nvim_win_get_cursor(0)) -- col is 0-based
+	local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
+	return line, col0
+end
+
+local function context_for(line, col0)
 	local before = line:sub(1, col0)
-	if before:find("=", 1, true) then
+	local eq = before:find("=", 1, true)
+	if eq then
 		return "value"
 	end
 	return "key"
 end
 
-local function current_key(line)
+local function key_for_line(line)
 	return (line:match("^%s*([^=]+)%s*=") or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
-function M.items_for_cursor()
-	local bufnr = vim.api.nvim_get_current_buf()
-	local row, col0 = unpack(vim.api.nvim_win_get_cursor(0))
-	local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
-	local kind = line_context(line, col0)
-
-	local items = {}
-
-	if kind == "key" then
-		local tok = (line:sub(1, col0):match("([%w%-%_]+)$") or "")
-		for _, k in ipairs(KEYS) do
-			if tok == "" or starts_with(k, tok) then
-				table.insert(items, { label = k, kind = "Property" })
-			end
-		end
-		return items
-	end
-
-	local key = current_key(line)
-	local tok = (line:sub(1, col0):match("=%s*(.-)$") or "")
-	tok = (tok:match("([^%s]+)$") or tok)
-
-	if key == "theme" then
-		for _, raw in ipairs(get_themes()) do
-			local t = normalize_theme(raw)
-			if t ~= "" and (tok == "" or starts_with(t, tok)) then
-				table.insert(items, { label = t, kind = "Value" })
-			end
-		end
-	elseif key == "macos-titlebar-style" then
-		for _, v in ipairs({ "hidden", "transparent", "tabs" }) do
-			if tok == "" or starts_with(v, tok) then
-				table.insert(items, { label = v, kind = "Value" })
-			end
-		end
-	elseif key == "keybind" then
-		-- Suggest actions (you can refine this later to only after "action:" etc.)
-		for _, a in ipairs(get_actions()) do
-			if tok == "" or starts_with(a, tok) then
-				table.insert(items, { label = a, kind = "Function" })
-			end
-		end
-	end
-
-	return items
+local function value_prefix(line, col0)
+	local before = line:sub(1, col0)
+	local rhs = before:match("=%s*(.-)$") or ""
+	return rhs:gsub("^%s+", "")
 end
 
 function M.clear_cache()
 	cache.themes = nil
 	cache.actions = nil
+end
+
+-- Omni completion entry point
+-- :h complete-functions
+function M.omnifunc(findstart, base)
+	local line, col0 = current_line_and_col()
+	local kind = context_for(line, col0)
+
+	if findstart == 1 then
+		-- return byte-index start of completion
+		local start = col0
+		if kind == "key" then
+			while start > 0 and line:sub(start, start):match("[%w%-%_]") do
+				start = start - 1
+			end
+			return start
+		else
+			-- for value: complete from after '=' and spaces
+			local eq = line:find("=", 1, true)
+			if not eq then
+				return col0
+			end
+			start = eq + 1
+			while start <= #line and line:sub(start, start):match("%s") do
+				start = start + 1
+			end
+			return start - 1 -- 0-based
+		end
+	end
+
+	local matches = {}
+
+	if kind == "key" then
+		for _, k in ipairs(KEYS) do
+			if base == "" or starts_with(k, base) then
+				table.insert(matches, k)
+			end
+		end
+		return matches
+	end
+
+	local key = key_for_line(line)
+	local prefix = value_prefix(line, col0)
+
+	if key == "theme" then
+		for _, raw in ipairs(get_themes()) do
+			local t = normalize_theme(raw)
+			if t ~= "" and (prefix == "" or starts_with(t, prefix)) then
+				table.insert(matches, t)
+			end
+		end
+	elseif key == "macos-titlebar-style" then
+		for _, v in ipairs({ "hidden", "transparent", "tabs" }) do
+			if prefix == "" or starts_with(v, prefix) then
+				table.insert(matches, v)
+			end
+		end
+	elseif key == "keybind" then
+		for _, a in ipairs(get_actions()) do
+			if prefix == "" or starts_with(a, prefix) then
+				table.insert(matches, a)
+			end
+		end
+	end
+
+	return matches
 end
 
 return M

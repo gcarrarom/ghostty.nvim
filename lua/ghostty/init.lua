@@ -211,12 +211,12 @@ end tell
 		end,
 	})
 
-	-- nvim-cmp integration (optional)
 	xtry(function()
 		local ok_cmp, cmp = pcall(require, "cmp")
-		if ok_cmp then
-			cmp.register_source("ghostty", require("ghostty.cmp_source"):new())
+		if not ok_cmp then
+			return
 		end
+		cmp.register_source("ghostty", require("ghostty.cmp_source"):new())
 	end, "cmp-register")
 
 	pcall(vim.api.nvim_del_user_command, "GhosttyClearCache")
