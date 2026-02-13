@@ -51,7 +51,6 @@ function M.setup(opts)
 	local function parse_assignment(line)
 		local main, cmt = line, nil
 
-		-- Inline comment only when # is preceded by whitespace
 		local before, after = line:match("^(.-)%s+#%s*(.*)$")
 		if before then
 			main = before
@@ -63,7 +62,7 @@ function M.setup(opts)
 			return nil
 		end
 
-		key = key:gsub("%s+$", "")
+		key = key:gsub("^%s+", ""):gsub("%s+$", "")
 		return { key = key, val = val, cmt = cmt }
 	end
 
@@ -114,7 +113,7 @@ function M.setup(opts)
 					table.insert(block, { kind = "assign", key = a.key, val = a.val, cmt = a.cmt })
 				else
 					flush_block()
-					table.insert(out, line:gsub("%s+$", ""))
+					table.insert(out, line:gsub("^%s+", ""):gsub("%s+$", ""))
 				end
 			end
 		end
