@@ -37,7 +37,9 @@ function M.setup(opts)
 
 	local function format_ghostty_lines(lines)
 		local out = {}
-		local block, max_key = {}, 0
+
+		local block = {}
+		local max_key = 0
 
 		local function flush_block()
 			if #block == 0 then
@@ -63,31 +65,29 @@ function M.setup(opts)
 				end
 			end
 
-			block, max_key = {}, 0
+			block = {}
+			max_key = 0
 		end
 
 		for _, line in ipairs(lines) do
 			if line:match("^%s*$") then
+				-- blank line ends block
 				flush_block()
 				table.insert(out, "")
-				goto continue
-			end
-
-			if line:match("^%s*#") then
+			elseif line:match("^%s*#") then
+				-- full-line comment: keep it, don't end block
 				table.insert(block, { kind = "comment", text = line:gsub("%s+$", "") })
-				goto continue
-			end
-
-			local a = parse_assignment(line)
-			if a then
-				max_key = math.max(max_key, #a.key)
-				table.insert(block, { kind = "assign", key = a.key, val = a.val, cmt = a.cmt })
 			else
-				flush_block()
-				table.insert(out, line:gsub("%s+$", ""))
+				local a = parse_assignment(line)
+				if a then
+					max_key = math.max(max_key, #a.key)
+					table.insert(block, { kind = "assign", key = a.key, val = a.val, cmt = a.cmt })
+				else
+					-- unknown line: end block and keep line
+					flush_block()
+					table.insert(out, line:gsub("%s+$", ""))
+				end
 			end
-
-			::continue::
 		end
 
 		flush_block()
