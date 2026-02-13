@@ -1,4 +1,4 @@
 augroup ghostty_ftdetect
   autocmd!
-  autocmd BufRead,BufNewFile */.config/ghostty/config setfiletype ghostty
+  autocmd BufRead,BufNewFile */ghostty/config setfiletype ghostty
 augroup END
